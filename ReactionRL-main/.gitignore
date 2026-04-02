@@ -1,0 +1,10 @@
+datasets/
+models/
+!models/MPNN*
+tensorboard/
+*/__pycache__/
+__pycache__/
+.ipynb_checkpoints
+lib/
+html/
+images/
