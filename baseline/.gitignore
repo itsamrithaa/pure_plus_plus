@@ -1,6 +1,10 @@
 datasets/
 models/
 !models/MPNN*
+# reactionrl/models/ is source code (model architecture definitions), not
+# trained-checkpoint output - keep it tracked despite the blanket models/ rule above.
+!reactionrl/models/
+!reactionrl/models/**
 tensorboard/
 */__pycache__/
 __pycache__/

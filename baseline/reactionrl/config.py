@@ -6,7 +6,7 @@ overridden via the MAIN_DIR environment variable. TrainingConfig holds
 all hyperparameters needed for offline RL training.
 """
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from multiprocessing import cpu_count
 from pathlib import Path
 
@@ -75,3 +75,43 @@ class TrainingConfig:
         if self.gin_model_path:
             return self.gin_model_path
         return str(PRETRAINED_MODELS_DIR / "zinc2m_gin.pth")
+
+
+@dataclass
+class PPOConfig:
+    """PPO config for the GAT-based actor-critic.
+
+    Unlike TrainingConfig (offline), this trains online via
+    MoleculeEditEnv rollouts with GAE + a clipped surrogate loss.
+    """
+    # Task / reward
+    property_weights: dict = field(default_factory=lambda: {"qed": 2.0, "drd2": 1.0, "logp": 1.0, "sa": 1.0})
+    similarity_threshold: float = 0.4
+    similarity_penalty_weight: float = 1.0
+    max_steps: int = 5
+
+    # Rollout schedule
+    episodes_per_update: int = 32
+    updates: int = 200
+
+    # PPO hyperparameters
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    clip_eps: float = 0.2
+    ppo_epochs: int = 4
+    minibatch_size: int = 64
+    entropy_coef: float = 0.01
+    value_coef: float = 0.5
+    max_grad_norm: float = 0.5
+    lr: float = 3e-4
+
+    # Model architecture
+    hidden_size: int = 256
+    gat_num_layers: int = 3
+    gat_num_heads: int = 4
+    actor_num_hidden: int = 3
+    critic_num_hidden: int = 2
+
+    # Runtime
+    seed: int = 42
+    device: str = "cpu"

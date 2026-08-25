@@ -1,0 +1,2 @@
+source,combined_before,qed_before,drd2_before,logp_before,sa_before,best_target,combined_after,combined_improvement,similarity,valid_candidates,num_decode,qed_after,drd2_after,logp_after,sa_after
+CNC(=O)c1cc(Oc2ccc(NC(=O)Nc3ccc(Cl)c(C(F)(F)F)c3)cc2)ccn1,4.021278694785346,0.4613395020059932,0.0,5.549700000000002,2.267021725109851,CNC(=O)c1cc(Oc2ccc(NC(=O)Nc3ccc(-c4cc(Nc5ccccc5C(C)C)ccc4F)c(C(F)(F)F)c3)cc2)ccn1,5.48434474883713,1.463066054051784,0.5921052631578947,10,10,0.11826240445237594,0.0,9.569399999999996,2.811547330735321

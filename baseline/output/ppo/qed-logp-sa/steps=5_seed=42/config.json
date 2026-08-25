@@ -1,0 +1,29 @@
+{
+  "property_weights": {
+    "qed": 2.0,
+    "drd2": 0.0,
+    "logp": 1.0,
+    "sa": 1.0
+  },
+  "similarity_threshold": 0.4,
+  "similarity_penalty_weight": 1.0,
+  "max_steps": 5,
+  "episodes_per_update": 8,
+  "updates": 20,
+  "gamma": 0.99,
+  "gae_lambda": 0.95,
+  "clip_eps": 0.2,
+  "ppo_epochs": 4,
+  "minibatch_size": 64,
+  "entropy_coef": 0.01,
+  "value_coef": 0.5,
+  "max_grad_norm": 0.5,
+  "lr": 0.0003,
+  "hidden_size": 256,
+  "gat_num_layers": 3,
+  "gat_num_heads": 4,
+  "actor_num_hidden": 3,
+  "critic_num_hidden": 2,
+  "seed": 42,
+  "device": "cpu"
+}

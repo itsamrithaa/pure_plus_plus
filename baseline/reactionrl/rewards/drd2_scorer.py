@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+import sys
 import numpy as np
 from rdkit import Chem
 from rdkit import rdBase
@@ -38,6 +39,13 @@ clf_model = None
 def load_model():
     global clf_model
     name = op.join(op.dirname(__file__), 'clf_py36.pkl')
+
+    # clf_py36.pkl was pickled with old sklearn (sklearn.svm.classes).
+    # Alias to the modern module path so unpickling doesn't crash.
+    if "sklearn.svm.classes" not in sys.modules:
+        import sklearn.svm._classes as _svm_classes
+        sys.modules["sklearn.svm.classes"] = _svm_classes
+
     with open(name, "rb") as f:
         clf_model = pickle.load(f)
 

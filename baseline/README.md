@@ -115,6 +115,73 @@ Options:
 
 ---
 
+## Online RL with PPO (GAT-based actor-critic)
+
+In addition to the offline actor-critic trainer above, `reactionrl` includes
+an online PPO trainer (`reactionrl.training.ppo.PPOTrainer`). Instead of
+learning from a fixed trajectory CSV, it rolls out a GAT-based actor-critic
+(`reactionrl.models.GATActorCritic`) against `reactionrl.envs.MoleculeEditEnv`
+- a small MDP built on top of the existing `ActionSpace` where each step
+applies one applicable reaction-template action to the current molecule -
+and optimizes the clipped PPO surrogate objective with a GAE(lambda)
+advantage estimate.
+
+The GAT backbone is trained from scratch (no ZINC-pretrained checkpoint is
+required, unlike the GIN backbone used by the offline path).
+
+### Train
+
+The reward is a *weighted combination* of QED, DRD2 activity, logP, and SA
+(synthetic accessibility) - set any weight to `0` to ignore that property.
+For example, to optimize sorafenib with QED weighted twice as heavily as
+the others (the default weights):
+
+```bash
+python -m reactionrl.scripts.train_ppo \
+    --qed-weight 2.0 --drd2-weight 1.0 --logp-weight 1.0 --sa-weight 1.0 \
+    --eval-smiles "CNC(=O)c1cc(ccn1)Oc2ccc(cc2)NC(=O)Nc3ccc(c(c3)C(F)(F)F)Cl" \
+    --updates 200 --episodes-per-update 32 --cuda 0
+```
+
+Key options:
+- `--qed-weight` / `--drd2-weight` / `--logp-weight` / `--sa-weight`: weights in the combined reward (defaults: 2.0/1.0/1.0/1.0). logP and SA are rescaled onto a comparable range to QED/DRD2 before being combined (see `combined_score` in `envs/molecule_env.py`).
+- `--eval-smiles` / `--eval-smiles-file`: the molecule(s) to report per-molecule before/after metrics for.
+- `--start-smiles-file`: pool of starting molecules for training rollouts (`.pickle`/`.csv`/`.txt`). Defaults to `datasets/my_uspto/unique_start_mols.pickle` (see `preprocessing/dump_start_mols.py`) if present, else falls back to `--eval-smiles` (i.e. training rollouts start from the same molecule(s) being evaluated - the right choice when optimizing one specific molecule like above).
+- `--similarity-threshold`: minimum Tanimoto similarity to the original molecule before the reward is penalized (keeps edits structurally constrained).
+- `--updates`, `--episodes-per-update`, `--ppo-epochs`, `--minibatch-size`, `--gamma`, `--gae-lambda`, `--clip-eps`, `--entropy-coef`, `--value-coef`, `--lr`: standard PPO hyperparameters (see `PPOConfig` in `config.py`).
+
+Each update prints a metrics row (mean reward, mean combined-score
+improvement, mean similarity to origin, policy/value loss, entropy, approx
+KL, clip fraction). `trainer.save()` writes `ppo_metrics.csv`, `model.pth`,
+and `config.json` to `output/ppo/<active-properties>/...`.
+
+### Evaluate / report
+
+After training, `train_ppo.py` automatically calls
+`reactionrl.evaluation.ppo_report.generate_report`, which decodes 20
+candidates per evaluation molecule (1 greedy + 19 sampled, matching the
+existing `num_decode=20` convention in `evaluation/evaluate.py`) and prints:
+
+- **Per-molecule table**: original vs. best-generated QED, DRD2, logP, and SA (each broken out individually), the combined-score improvement, and Tanimoto similarity to the original, for each evaluation molecule.
+- **Aggregate metrics**: validity, average combined score, average improvement, average similarity, novelty, diversity (via the existing `evaluate_metric`).
+- **Success rates**: fraction of molecules with a similarity-gated valid/improved edit.
+
+It also saves `per_molecule_metrics.csv`, `all_decoded_candidates.csv`,
+`aggregate_metrics.csv`, `success_rate.csv`, and a `before_after_property.png`
+2x2 bar chart (one panel per property) to `output/ppo/<active-properties>/.../eval_report/`.
+
+To generate a report from an already-trained model without retraining:
+
+```python
+import torch
+from reactionrl.evaluation.ppo_report import generate_report
+
+model = torch.load("output/ppo/qed-drd2-logp-sa/steps=5_seed=42/model.pth")
+generate_report(model, ["CNC(=O)c1cc(ccn1)Oc2ccc(cc2)NC(=O)Nc3ccc(c(c3)C(F)(F)F)Cl"], output_dir="my_report")
+```
+
+---
+
 ## How to Experiment
 
 The codebase is modular -- here's how to swap or modify components:
