@@ -1,11 +1,6 @@
-"""Beam search generation for molecule optimization (Algorithm 2 from PURE paper).
+"""Beam search generation for molecule optimization.
 
-Given a trained actor-critic model and (source, target) molecule pairs, generates
-new molecules by iteratively:
-  1. Using the actor to predict action embeddings
-  2. Filtering to top-B_A applicable actions by Euclidean distance
-  3. Re-ranking with the critic, keeping top-B by Q-value
-  4. Applying the selected actions to produce new molecules
+Corrected for GAT backbone compatibility and H100 GPU device handling.
 """
 import numpy as np
 import pandas as pd
@@ -26,13 +21,7 @@ from reactionrl.evaluation.properties import similarity as tanimoto_similarity
 
 
 def prepare_action_data(action_space=None):
-    """Pack action signatures into torchdrug molecules for embedding computation.
-
-    Returns:
-        Tuple of (action_dataset_df, action_rsigs, action_psigs) where
-        action_dataset_df has the 8 standard columns and rsigs/psigs are
-        packed torchdrug Molecule batches.
-    """
+    """Pack action signatures into torchdrug molecules for embedding computation."""
     if action_space is None:
         action_space = get_default_action_space()
     action_dataset = action_space.dataset[
@@ -47,48 +36,32 @@ def get_topk_predictions(model, source_list, target_list,
                          action_rsigs, action_psigs,
                          device, topk_actor=50, topk_critic=5,
                          batch_size=1024, num_workers=8):
-    """Get top actions for each source-target pair via actor filtering + critic re-ranking.
-
-    Args:
-        model: Trained ActorCritic model (on device).
-        source_list: List of source SMILES strings.
-        target_list: List of target SMILES strings (same length as source_list).
-        action_rsigs: Packed torchdrug Molecule for all action rsigs.
-        action_psigs: Packed torchdrug Molecule for all action psigs.
-        device: Torch device.
-        topk_actor: B_A — number of actions to keep after actor filtering.
-        topk_critic: B — number of actions to keep after critic re-ranking.
-        batch_size: Batch size for model inference.
-        num_workers: Workers for computing applicable actions.
-
-    Returns:
-        List of np.ndarray, each containing action dataset indices for the
-        top actions for each source molecule.
-    """
+    """Get top actions via actor filtering + critic re-ranking."""
     n = len(source_list)
 
     # Pack source and target molecules
     sources = data.Molecule.pack(list(map(molecule_from_smile, source_list)))
     targets = data.Molecule.pack(list(map(molecule_from_smile, target_list)))
 
-    # Step 1: Actor predictions in batches
+    # Step 1: Actor predictions in batches (moved to CPU for distance math)
     model.eval()
     with torch.no_grad():
-        pred = torch.concatenate([
+        pred = torch.cat([
             model(
                 sources[i:min(i + batch_size, n)].to(device),
                 targets[i:min(i + batch_size, n)].to(device),
                 None, None, "actor"
             ).detach().cpu()
             for i in range(0, n, batch_size)
-        ], axis=0)
+        ], dim=0)
 
-    # Get action embeddings from the model's GIN backbone
+    # Identify backbone dynamically and move embeddings to CPU to match 'pred'
+    backbone = model.GAT if hasattr(model, 'GAT') else model.GIN
     action_embeddings = get_action_dataset_embeddings(
-        model.GIN, action_rsigs, action_psigs
+        backbone, action_rsigs, action_psigs
     ).cpu()
 
-    # Step 2: Get applicable action indices per source (multiprocessed)
+    # Step 2: Get applicable action indices per source
     applicable_action_indices_list = []
     rows = [{"reactant": source_list[i]} for i in range(n)]
     with Pool(num_workers) as p:
@@ -105,12 +78,12 @@ def get_topk_predictions(model, source_list, target_list,
         if len(adi) == 0:
             filtered_indices[i] = np.array([], dtype=np.int64)
             continue
-        dist = torch.linalg.norm(action_embeddings[adi] - pred[i], axis=1)
+        # Standardized 'dim' keyword and ensured CPU-CPU math
+        dist = torch.linalg.norm(action_embeddings[adi] - pred[i], dim=1)
         top_k = min(topk_actor, len(adi))
         filtered_indices[i] = adi[torch.argsort(dist)[:top_k].numpy().astype(np.int64)]
 
     # Step 4: Critic re-ranking — top B by Q-value
-    # Batch all (source, target, rsig, psig) tuples for critic evaluation
     all_action_indices = np.concatenate([filtered_indices[i] for i in range(n)])
     all_state_indices = np.concatenate([
         np.full(len(filtered_indices[i]), i, dtype=np.int64) for i in range(n)
@@ -120,7 +93,7 @@ def get_topk_predictions(model, source_list, target_list,
         return [np.array([], dtype=np.int64) for _ in range(n)]
 
     with torch.no_grad():
-        critic_qs = torch.concatenate([
+        critic_qs = torch.cat([
             model(
                 sources[all_state_indices[j:j + batch_size]].to(device),
                 targets[all_state_indices[j:j + batch_size]].to(device),
@@ -129,9 +102,8 @@ def get_topk_predictions(model, source_list, target_list,
                 "critic"
             ).detach().cpu()
             for j in range(0, len(all_action_indices), batch_size)
-        ], axis=0).numpy().reshape(-1)
+        ], dim=0).numpy().reshape(-1)
 
-    # Split critic scores back per source and select top B
     result = []
     offset = 0
     for i in range(n):
@@ -149,14 +121,7 @@ def get_topk_predictions(model, source_list, target_list,
 
 
 def _apply_actions_worker(args):
-    """Apply action indices to a reactant molecule. Multiprocessing worker.
-
-    Args:
-        args: Tuple of (reactant_smiles, action_indices_array).
-
-    Returns:
-        List of (product_smiles, action_index) tuples for successful applications.
-    """
+    """Worker to apply actions to molecules."""
     reactant_smi, action_indices = args
     if len(action_indices) == 0:
         return []
@@ -180,32 +145,10 @@ def generate_molecules(model, source_smiles, target_smiles,
                        action_rsigs, action_psigs,
                        device, steps=5, topk_actor=50, topk_critic=5,
                        num_workers=8):
-    """Run Algorithm 2 beam search to generate molecules similar to targets.
-
-    For each step, uses the actor-critic model to select and apply the best
-    chemical transformations, building a tree of molecules from each source.
-
-    Args:
-        model: Trained ActorCritic model (on device).
-        source_smiles: List of starting molecule SMILES (one per target).
-        target_smiles: List of target molecule SMILES (same length).
-        action_rsigs: Packed torchdrug Molecule for action rsigs.
-        action_psigs: Packed torchdrug Molecule for action psigs.
-        device: Torch device.
-        steps: Number of generation steps (N in paper).
-        topk_actor: B_A — actor pre-filter count.
-        topk_critic: B — beam width after critic re-ranking.
-        num_workers: Multiprocessing workers.
-
-    Returns:
-        trajectory_dict: Maps composite keys to SMILES. Key format:
-            "{target_idx}_{action_step1}_{action_step2}_..."
-        similarity_dict: Maps same keys to Tanimoto similarity to target.
-    """
+    """Run Algorithm 2 beam search."""
     n = len(source_smiles)
     assert len(target_smiles) == n
 
-    # Initialize tracking
     trajectory_dict = {str(i): source_smiles[i] for i in range(n)}
     source_keys = [str(i) for i in range(n)]
     current_sources = list(source_smiles)
@@ -215,10 +158,8 @@ def generate_molecules(model, source_smiles, target_smiles,
         print(f"Generation step {step}/{steps} — {len(current_sources)} source molecules")
 
         if len(current_sources) == 0:
-            print("No source molecules remaining, stopping.")
             break
 
-        # Get top actions via actor-critic
         current_targets = [target_smiles[ti] for ti in target_idx_list]
         pred_indices = get_topk_predictions(
             model, current_sources, current_targets,
@@ -227,7 +168,6 @@ def generate_molecules(model, source_smiles, target_smiles,
             num_workers=num_workers,
         )
 
-        # Apply actions in parallel
         new_keys = []
         new_sources = []
         new_target_idx = []
@@ -249,7 +189,6 @@ def generate_molecules(model, source_smiles, target_smiles,
         current_sources = new_sources
         target_idx_list = new_target_idx
 
-    # Compute similarity for all generated molecules
     print(f"Computing similarities for {len(trajectory_dict)} molecules...")
     similarity_dict = {}
     for key, smi in tqdm.tqdm(trajectory_dict.items()):

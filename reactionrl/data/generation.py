@@ -9,10 +9,16 @@ from reactionrl.actions import get_applicable_actions, apply_action
 
 
 def _get_app_act_count(smile):
-    act = get_applicable_actions(Chem.MolFromSmiles(smile))
-    if len(act.shape) > 0:
-        return act.shape[0]
-    return 0
+    try:
+        act = get_applicable_actions(Chem.MolFromSmiles(smile))
+        if len(act.shape) > 0:
+            return act.shape[0]
+        return 0
+        pass
+    except Exception as e:
+        # Instead of crashing, print the SMILES that failed and return 0
+        print(f"Error processing molecule: {e}")
+        return 0
 
 
 def calc_start_mol_prob_dist(start_mols, processes=5):

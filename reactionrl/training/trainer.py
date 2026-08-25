@@ -65,11 +65,24 @@ class OfflineRLTrainer:
             self.actor_log_std = nn.Parameter(
                 torch.zeros(model.actor.last_layer.out_features, dtype=torch.float32)
             ).to(self.device)
+        
+        if hasattr(config, "backbone_type") and config.backbone_type == "GAT":
+            print("Using GAT encoder for embedding reference...")
+            # Use the encoder
+            if hasattr(model, "GAT"):
+                self.embedding_model = model.GAT
+            elif hasattr(model, "encoder"):
+                self.embedding_model = model.encoder
+            else:
+                raise AttributeError("Could not find GAT encoder in model object")
+        else:
+            print("Loading GIN reference model...")
+            gin_path = config.get_gin_model_path()
+            self.embedding_model = torch.load(gin_path, weights_only=False).to(self.device)
+        
+        self.embedding_model.eval()
+        
 
-        # Embedding model for computing action embeddings - synced with model's GIN
-        gin_path = config.get_gin_model_path()
-        self.embedding_model = torch.load(gin_path, weights_only=False).to(self.device)
-        self.embedding_model.load_state_dict(model.GIN.state_dict())
         self.action_embeddings = get_action_dataset_embeddings(
             self.embedding_model, dataset.action_rsigs, dataset.action_psigs
         )
@@ -376,8 +389,14 @@ class OfflineRLTrainer:
                 if self.train_critic and not self.train_actor:
                     self.validate_critic(epoch, valid_split, start_time)
 
-                # Sync embedding model with updated GIN backbone
-                self.embedding_model.load_state_dict(self.model.GIN.state_dict())
+                if hasattr(self.model, "GAT"):
+                    self.embedding_model.load_state_dict(self.model.GAT.state_dict())
+                elif hasattr(self.model, "GIN"):
+                    self.embedding_model.load_state_dict(self.model.GIN.state_dict())
+                else:
+                    # If we used the 'self.encoder' naming convention
+                    self.embedding_model.load_state_dict(self.model.encoder.state_dict())
+
                 self.action_embeddings = get_action_dataset_embeddings(
                     self.embedding_model, self.dataset.action_rsigs, self.dataset.action_psigs
                 )

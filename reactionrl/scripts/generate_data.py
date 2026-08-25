@@ -7,7 +7,6 @@ from multiprocessing import cpu_count
 from reactionrl.config import DATASETS_DIR
 from reactionrl.data.generation import calc_start_mol_prob_dist, generate_data
 
-
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train-samples", type=int, default=100000, help="Number of data points to use")

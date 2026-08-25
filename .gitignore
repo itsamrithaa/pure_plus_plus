@@ -1,10 +1,23 @@
+# Ignore large datasets
 datasets/
-/models/
-!/models/MPNN*
-tensorboard/
-*/__pycache__/
+iclr19-graph2graph/
+
+# Ignore large model weights and outputs
+output/
+pretrained_models/
+*.pth
+*.pickle
+*.pkl
+*.csv
+*.gz
+
+# Ignore supercomputer logs
+logs/
+slurm-*.out
+slurm-*.err
+*.png
+
+# Keep the scripts but ignore the hidden python junk
 __pycache__/
-.ipynb_checkpoints
-lib/
-html/
-images/
+*.pyc
+.ipynb_checkpoints/

@@ -30,6 +30,11 @@ from reactionrl.evaluation.properties import (
 )
 from reactionrl.rewards.properties import drd2 as eval_drd2
 
+import sklearn.svm
+import sklearn.ensemble
+sys.modules['sklearn.svm.classes'] = sklearn.svm
+sys.modules['sklearn.ensemble.forest'] = sklearn.ensemble
+
 # Property scoring functions keyed by benchmark name
 SCORING_FNS = {
     "qed": lambda smi: eval_qed(smi) if smi else 0.0,
@@ -144,9 +149,11 @@ def get_args():
     )
     parser.add_argument("--model-path", type=str, required=True,
                         help="Path to trained model .pth file")
+    # parser.add_argument("--property", type=str, required=True,
+    #                     choices=["qed", "drd2", "logp04", "logp06"],
+    #                     help="Benchmark property to evaluate")
     parser.add_argument("--property", type=str, required=True,
-                        choices=["qed", "drd2", "logp04", "logp06"],
-                        help="Benchmark property to evaluate")
+                        help="Property name (e.g., qed) or chunk name (e.g., qed_chunk_aa)")
     parser.add_argument("--cuda", type=int, default=-1,
                         help="GPU device index (-1 for CPU)")
     parser.add_argument("--num-start-mols", type=int, default=10,
@@ -171,8 +178,15 @@ def get_args():
 def main():
     args = get_args()
 
-    # Check data
+    base_property = args.property
+    for key in SCORING_FNS.keys():
+        if args.property.startswith(key):
+            base_property = key
+            break
+
+    # Check data 
     test_path = check_coma_data(args.property)
+
     if test_path is None:
         return
 
@@ -204,7 +218,7 @@ def main():
         test_targets = test_targets[:args.max_targets]
     print(f"Evaluating on {len(test_targets)} test targets")
 
-    scoring_fn = SCORING_FNS[args.property]
+    scoring_fn = SCORING_FNS[base_property]
 
     # Generate molecules for all targets
     all_traj = {}
@@ -258,7 +272,7 @@ def main():
     print(f"{'=' * 60}")
 
     actual_targets = test_targets[:target_offset]
-    for x, y in COEFF_COMBOS[args.property]:
+    for x, y in COEFF_COMBOS[base_property]:
         print(f"\n--- Coefficients: x={x}, y={y} ---")
         df = select_top_molecules(
             all_traj, all_sim, actual_targets,
